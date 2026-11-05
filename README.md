@@ -4,7 +4,7 @@
 
 Reproducible acquisition of **federal contract transactions**, not award totals.
 Source: https://api.usaspending.gov/docs/endpoints (official US Treasury data).
-Current version: **v0.3 checkpointed multi-year harvesting**. No fabricated data is included.
+Current version: **v0.4 Gold semantic model (Power BI-ready Parquet)**. No fabricated data is included.
 
 ## Quick start (Windows PowerShell)
 
@@ -34,6 +34,29 @@ If PowerShell execution policy prevents activation, skip activation:
 .\.venv\Scripts\fsi.exe probe --fy 2026 --limit 300 --agency "Department of Transportation"
 .\.venv\Scripts\fsi.exe bulk --start 2026-09-01 --end 2026-09-30 --agency "Department of Transportation"
 ```
+
+## v0.4: Audited Gold star schema for Power BI
+
+After completing the DOT campaign with `harvest-report` (status `complete`),
+run locally without additional API calls:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\fsi.exe harvest-report --fy-start 2023 --fy-end 2026
+.\.venv\Scripts\fsi.exe gold --fy-start 2023 --fy-end 2026
+.\.venv\Scripts\fsi.exe gold-report --fy-start 2023 --fy-end 2026
+```
+
+Gold writes six Parquet files into `data/marts/gold/<campaign-id>/`:
+one signed-transaction fact, and Date, Agency, Recipient, NAICS, PSC dimensions.
+It blocks incomplete harvests by default and checks cross-partition uniqueness,
+Gold/Silver row counts and dollar totals, all dimension keys, relationship
+integrity, and source/output SHA-256 hashes. It does not sum Subawards or
+award-level cumulative values. See **[docs/gold_model.md](docs/gold_model.md)**
+for the exact Power BI relationships and example DAX.
+
+**Do not merge the DOT campaign with an all-agency campaign:** their rows overlap.
+The current 4-FY report is DOT only, not a nationwide agency comparison.
 
 ## v0.3: Checkpointed harvesting, FY2023–FY2026
 
@@ -220,7 +243,7 @@ Copy the actual printed path. **Do not launch a new bulk job to resume.**
 1. **v0.1** Verify a live probe and one monthly bulk export (Department of Transportation).
 2. **v0.2** Build typed Silver transaction fact, stable transaction key and DQ tests (**implemented**).
 3. **v0.3** Implement checkpointed FY2023–FY2026 month downloads, partition splitting and audits (**implemented; live multi-month verification pending**).
-4. **v0.4** Build Power BI star schema and DAX.
+4. **v0.4** Build audited Gold star schema and DAX (**implemented**).
 5. **v0.5+** Financial diagnostics, contractor concentration, anomalies.
 
 ## Sources

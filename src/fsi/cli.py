@@ -305,6 +305,22 @@ def parser() -> argparse.ArgumentParser:
     hreport.add_argument("--agency", default="Department of Transportation")
     hreport.add_argument("--all-agencies", action="store_true")
 
+    gold = sub.add_parser(
+        "gold", help="Build audited Power BI star-schema Parquet from a harvest campaign"
+    )
+    gold.add_argument("--fy-start", type=int, default=2023)
+    gold.add_argument("--fy-end", type=int, default=2026)
+    gold.add_argument("--agency", default="Department of Transportation")
+    gold.add_argument("--all-agencies", action="store_true")
+    gold.add_argument("--allow-partial", action="store_true")
+    gold.add_argument("--overwrite", action="store_true")
+
+    gold_report = sub.add_parser("gold-report", help="Verify Gold Parquet file checksums")
+    gold_report.add_argument("--fy-start", type=int, default=2023)
+    gold_report.add_argument("--fy-end", type=int, default=2026)
+    gold_report.add_argument("--agency", default="Department of Transportation")
+    gold_report.add_argument("--all-agencies", action="store_true")
+
     for item in (bulk, resume):
         item.add_argument("--max-wait", type=int, default=900)
         item.add_argument("--poll", type=int, default=10)
@@ -316,6 +332,32 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     if getattr(args, "all_agencies", False):
         args.agency = None
+    if args.command in {"gold", "gold-report"}:
+        try:
+            from .gold import build_gold, inspect_gold
+            if args.command == "gold":
+                report = build_gold(
+                    base_dir(args), args.fy_start, args.fy_end, args.agency,
+                    allow_partial=args.allow_partial, overwrite=args.overwrite,
+                )
+            else:
+                report = inspect_gold(base_dir(args), args.fy_start, args.fy_end, args.agency)
+            q = report["quality"]
+            print(
+                f"GOLD_{report['status'].upper()} rows={q['rows']:,} "
+                f"net_usd={q['net_obligations_usd']} "
+                f"coverage={q['coverage_status']}"
+            )
+            from .harvest import campaign_path
+            campaign = campaign_path(
+                base_dir(args), args.fy_start, args.fy_end, args.agency
+            )
+            print("Quality report:", base_dir(args) / "data/marts/gold"
+                  / campaign.parent.name / "gold_quality.json")
+            return 0
+        except (ApiError, ValueError, OSError, json.JSONDecodeError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
     if args.command == "plan":
         return cmd_plan(args)
     if args.command in {"harvest", "harvest-report"}:
