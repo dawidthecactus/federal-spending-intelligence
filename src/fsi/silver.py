@@ -141,7 +141,9 @@ def build_silver(job_file: Path, output_root: Path, *, overwrite: bool = False) 
                        THEN 1 ELSE 0 END)
         """).fetchone()[0]
         if source_fy_mismatch:
-            raise ApiError(f"Official action_date_fiscal_year disagrees with date: {source_fy_mismatch}")
+            raise ApiError(
+                f"Official action_date_fiscal_year disagrees with date: {source_fy_mismatch}"
+            )
         fact_sql = f"SELECT {projection} FROM {relation}"
         try:
             conn.execute(f"COPY ({fact_sql}) TO {quote_sql(partial.as_posix())} "

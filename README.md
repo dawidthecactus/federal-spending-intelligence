@@ -4,7 +4,7 @@
 
 Reproducible acquisition of **federal contract transactions**, not award totals.
 Source: https://api.usaspending.gov/docs/endpoints (official US Treasury data).
-Current version: **v0.2 typed Silver + corrected Bronze Quality Gate**. No fabricated data is included.
+Current version: **v0.3 checkpointed multi-year harvesting**. No fabricated data is included.
 
 ## Quick start (Windows PowerShell)
 
@@ -34,6 +34,71 @@ If PowerShell execution policy prevents activation, skip activation:
 .\.venv\Scripts\fsi.exe probe --fy 2026 --limit 300 --agency "Department of Transportation"
 .\.venv\Scripts\fsi.exe bulk --start 2026-09-01 --end 2026-09-30 --agency "Department of Transportation"
 ```
+
+## v0.3: Checkpointed harvesting, FY2023–FY2026
+
+This phase introduces **month-by-month acquisition**, automatic splitting of
+partitions that exceed USAspending's official row cap, a persistent checkpoint
+and **bounded execution**. It is designed to run on your workstation, where
+`data/raw/` and `data/silver/` already exist.
+
+First, inspect the plan without making network requests:
+
+```powershell
+.\.venv\Scripts\fsi.exe harvest --fy-start 2023 --fy-end 2026
+```
+
+Then opt into **one new full-month export** and reuse the previously verified
+September 2026 Department of Transportation export:
+
+```powershell
+.\.venv\Scripts\fsi.exe harvest --fy-start 2023 --fy-end 2026 --execute --max-exports 1 --adopt-existing
+```
+
+Re-run **exactly the same** command to resume or fetch the next month.
+No completed partition is redownloaded; unfinished API jobs reuse their stored
+status URL. If a month exceeds the API limit, it splits into two disjoint date
+ranges on disk (new children are processed on the next invocation). A window
+with zero matching records is explicitly recorded as `empty`. If even **one day**
+exceeds the cap, harvesting stops with a clear error: choose narrower agency
+filters or an official government bulk dataset instead. This workflow **never
+silently truncates an export**.
+
+For a bounded nationwide pilot (much larger and potentially storage-heavy):
+
+```powershell
+.\.venv\Scripts\fsi.exe harvest --fy-start 2026 --fy-end 2026 --all-agencies
+.\.venv\Scripts\fsi.exe harvest --fy-start 2026 --fy-end 2026 --all-agencies --execute --max-exports 1
+```
+
+The DOT and all-agencies campaigns have different manifests and **must not be
+summed together** because their data overlaps.
+
+### Audit across partitions
+
+```powershell
+.\.venv\Scripts\fsi.exe harvest-report --fy-start 2023 --fy-end 2026
+```
+
+The audit verifies that the transaction key remains unique **across** all
+completed Silver partitions, sums signed changes in obligations and records the
+number of incomplete windows. It writes `data/harvest/<campaign>/harvest_quality.json`.
+If the campaign is only partly complete, totals are **preliminary**; the command
+returns exit code **2**, not a false success. Verified totals are *contract
+obligations*, not government outlays or overall federal expenditure.
+
+All harvest checkpoints, raw ZIPs, Parquet and financial summaries remain
+outside Git (`data/harvest/`, `data/raw/`, `data/staging/`, `data/silver/`).
+The first several years of raw all-agencies data may require substantial disk
+space, and USAspending data can be revised after an extract. Preserve snapshots
+and extraction dates for reproducibility.
+
+### Operational note
+
+Run **one harvest command per campaign at a time**. v0.3 does not implement
+cross-process campaign locking. A sudden crash during an API submission may
+leave an orphaned export job before its checkpoint was written. In that case,
+inspect `data/raw/bulk/` before rerunning; do not blindly start multiple clients.
 
 ## v0.2: Typed Silver transaction fact
 
@@ -72,10 +137,9 @@ claim the month or agency is representative of all federal spending.
 To intentionally rebuild the same Silver file after modifying transformations,
 add `--overwrite` (the original Bronze ZIP stays unchanged).
 
-**Current limitation:** v0.2 outputs a typed fact for one VERIFIED extraction.
-Across-partition duplicate handling and FY2023–FY2026 all-agency orchestration
-are deferred to v0.3. Re-running the same bulk job does not create a new
-national data point. All raw/staging/silver files remain local and Git-ignored.
+**Important:** v0.2's Silver facts are *per export*, not automatically a complete
+national dataset. v0.3 orchestrates monthly fetches and adds a cross-partition
+uniqueness audit. Fiscal-year completeness must be checked separately.
 
 ## Fix in v0.1.1: prime transactions vs subawards
 
@@ -133,6 +197,7 @@ Copy the actual printed path. **Do not launch a new bulk job to resume.**
 | `data/staging/probe/` | Structural probe Parquet | No |
 | `data/staging/bulk/` | Contract transaction columns from official CSV in Parquet | No |
 | `data/silver/jobs/` | Typed and audited transaction fact, one export at a time | No |
+| `data/harvest/` | Local campaign checkpoints and cross-partition audits | No |
 | `docs/` | Definition of grain, dates and controls | Yes |
 
 ## Important financial semantics
@@ -154,7 +219,7 @@ Copy the actual printed path. **Do not launch a new bulk job to resume.**
 
 1. **v0.1** Verify a live probe and one monthly bulk export (Department of Transportation).
 2. **v0.2** Build typed Silver transaction fact, stable transaction key and DQ tests (**implemented**).
-3. **v0.3** Collect FY2023–FY2026 by agency × month, reconcile totals.
+3. **v0.3** Implement checkpointed FY2023–FY2026 month downloads, partition splitting and audits (**implemented; live multi-month verification pending**).
 4. **v0.4** Build Power BI star schema and DAX.
 5. **v0.5+** Financial diagnostics, contractor concentration, anomalies.
 
@@ -166,6 +231,8 @@ Copy the actual printed path. **Do not launch a new bulk job to resume.**
 - https://github.com/fedspendingtransparency/usaspending-api/blob/master/usaspending_api/api_contracts/contracts/v2/download/transactions.md
 - https://github.com/fedspendingtransparency/usaspending-api/blob/master/usaspending_api/api_contracts/contracts/v2/download/status.md
 
-**Limitations:** The v0.2 Silver step was tested structurally and with offline unit tests.
-A live integration run against your downloaded 3,629-row local Parquet requires
-your workstation (the raw files are not available in this environment).
+**Limitations:** The v0.3 orchestration passed local unit tests, but live
+multi-month extraction has not been executed in this environment (network
+and previously downloaded raw files are unavailable). Run the bounded pilot
+locally before expanding. The overall agency population/refresh strategy is
+not yet finalized; the default campaign covers Department of Transportation.

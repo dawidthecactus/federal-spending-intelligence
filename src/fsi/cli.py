@@ -119,13 +119,17 @@ def preflight(client: UsaSpendingClient, filters: dict[str, Any]) -> dict:
     return data
 
 
-def cmd_bulk(args: argparse.Namespace, client: UsaSpendingClient) -> int:
+def submit_bulk_job(
+    args: argparse.Namespace, client: UsaSpendingClient,
+    *, estimated: dict[str, Any] | None = None,
+) -> Path:
+    """Submit and persist one export. Caller may resume its job without resubmitting."""
     a, b = date_window(args.start, args.end)
     if (b - a).days > 31:
         raise ValueError("Bulk runs cover at most 32 days. Use monthly partitions.")
     filters = build_filters(args.start, args.end, args.agency)
     print(f"Preflight: {args.start}..{args.end}, awarding agency: {args.agency or 'ALL'}")
-    estimated = preflight(client, filters)
+    estimated = estimated or preflight(client, filters)
     expected = estimated["calculated_count"]
     print(f"Expected transactions: {expected:,}; API limit: {estimated.get('maximum_limit')}")
     payload = {"filters": filters, "file_format": "csv"}
@@ -138,7 +142,7 @@ def cmd_bulk(args: argparse.Namespace, client: UsaSpendingClient) -> int:
     job = base_dir(args) / "data/raw/bulk" / (
         f"{args.start}_{args.end}_{utc_stamp()}"
     )
-    job.mkdir(parents=True, exist_ok=True)
+    job.mkdir(parents=True, exist_ok=False)
     manifest = {
         "workflow": "bulk_transactions", "status": "submitted",
         "coverage": {"start": args.start, "end": args.end, "agency": args.agency},
@@ -151,7 +155,12 @@ def cmd_bulk(args: argparse.Namespace, client: UsaSpendingClient) -> int:
     manifest_path = job / "job.json"
     write_json(manifest_path, manifest)
     print(f"Submitted bulk job. Saved: {manifest_path}")
-    return finalize_job(client, manifest_path, args)
+    return manifest_path
+
+
+def cmd_bulk(args: argparse.Namespace, client: UsaSpendingClient) -> int:
+    job_file = submit_bulk_job(args, client)
+    return finalize_job(client, job_file, args)
 
 
 def finalize_job(client: UsaSpendingClient, job_file: Path, args) -> int:
@@ -274,6 +283,28 @@ def parser() -> argparse.ArgumentParser:
     silver.add_argument("--job", type=Path, required=True)
     silver.add_argument("--overwrite", action="store_true")
 
+    harvest = sub.add_parser(
+        "harvest", help="Plan or incrementally download fiscal-year month partitions"
+    )
+    harvest.add_argument("--fy-start", type=int, default=2023)
+    harvest.add_argument("--fy-end", type=int, default=2026)
+    harvest.add_argument("--agency", default="Department of Transportation")
+    harvest.add_argument("--all-agencies", action="store_true")
+    harvest.add_argument("--execute", action="store_true", help="Opt in to network calls")
+    harvest.add_argument("--max-exports", type=int, default=1,
+                         help="Cap new export jobs per run; default one")
+    harvest.add_argument("--adopt-existing", action="store_true",
+                         help="Re-use already validated monthly bulk+Silver jobs")
+    harvest.add_argument("--max-wait", type=int, default=900)
+    harvest.add_argument("--poll", type=int, default=10)
+    harvest.add_argument("--max-mb", type=int, default=1024)
+
+    hreport = sub.add_parser("harvest-report", help="Audit saved partition manifest")
+    hreport.add_argument("--fy-start", type=int, default=2023)
+    hreport.add_argument("--fy-end", type=int, default=2026)
+    hreport.add_argument("--agency", default="Department of Transportation")
+    hreport.add_argument("--all-agencies", action="store_true")
+
     for item in (bulk, resume):
         item.add_argument("--max-wait", type=int, default=900)
         item.add_argument("--poll", type=int, default=10)
@@ -287,6 +318,14 @@ def main(argv: list[str] | None = None) -> int:
         args.agency = None
     if args.command == "plan":
         return cmd_plan(args)
+    if args.command in {"harvest", "harvest-report"}:
+        try:
+            from .harvest import campaign_main
+            return campaign_main(args, client=UsaSpendingClient() if args.command == "harvest"
+                                 and args.execute else None)
+        except (ApiError, ValueError, OSError, json.JSONDecodeError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
     if args.command == "silver":
         try:
             from .silver import build_silver

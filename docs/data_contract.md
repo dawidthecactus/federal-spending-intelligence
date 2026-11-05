@@ -74,3 +74,18 @@ subset. Enforce the verified Bronze gate before building Silver. Silver checks
 row count, unique key count, date bounds, FY consistency, signed-amount sum,
 negative count and non-null typed amounts. Silver jobs are kept separate until
 cross-partition reconciliation is implemented in v0.3.
+
+## v0.3 Multi-year acquisition notes
+
+- Month partitions are **inclusive** and non-overlapping. If above the API cap,
+  split into two inclusive child date windows (no shared boundary day).
+- A completed campaign requires all leaf windows to be verified or confirmed empty.
+- Campaign configuration includes full FY range and awarding-agency scope.
+- The nationwide (`--all-agencies`) campaign overlaps the agency-specific campaign.
+  Never aggregate these campaigns together.
+- A verified existing monthly extraction can be adopted only when its date window,
+  agency and Silver fact digest match its saved audit. It is not re-downloaded.
+- Cross-partition transaction-key duplicates are a strict quality failure.
+- Financial net amounts across incomplete campaigns are provisional.
+- USAspending amounts are subject to later source updates; extract snapshots
+  should be retained and source freshness documented.

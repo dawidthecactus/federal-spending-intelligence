@@ -149,7 +149,8 @@ def test_offline_parquet_probe_conversion(tmp_path: Path):
     out = tmp_path / "out.parquet"
     assert parquet_from_jsonl(raw, out) == 1
     with duckdb.connect() as conn:
-        amount = conn.execute(f"SELECT transaction_amount_usd FROM read_parquet('{out}')").fetchone()[0]
+        sql = f"SELECT transaction_amount_usd FROM read_parquet('{out}')"
+        amount = conn.execute(sql).fetchone()[0]
     assert str(amount) == "-100.25"
 
 

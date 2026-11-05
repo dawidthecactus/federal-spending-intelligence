@@ -9,6 +9,7 @@ build/
 data/raw/
 data/staging/
 data/silver/
+data/harvest/
 data/marts/
 *.duckdb
 *.duckdb.wal
