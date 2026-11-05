@@ -268,6 +268,12 @@ def parser() -> argparse.ArgumentParser:
     verify = sub.add_parser("verify", help="Reconcile existing local bulk files without API")
     verify.add_argument("--job", type=Path, required=True)
 
+    silver = sub.add_parser(
+        "silver", help="Build typed Silver contract transaction fact from verified bulk"
+    )
+    silver.add_argument("--job", type=Path, required=True)
+    silver.add_argument("--overwrite", action="store_true")
+
     for item in (bulk, resume):
         item.add_argument("--max-wait", type=int, default=900)
         item.add_argument("--poll", type=int, default=10)
@@ -281,6 +287,21 @@ def main(argv: list[str] | None = None) -> int:
         args.agency = None
     if args.command == "plan":
         return cmd_plan(args)
+    if args.command == "silver":
+        try:
+            from .silver import build_silver
+
+            report = build_silver(args.job, base_dir(args), overwrite=args.overwrite)
+            q = report["quality"]
+            print(
+                f"SILVER_VERIFIED rows={q['rows']:,}; negative={q['negative_rows']:,}; "
+                f"net_usd={q['net_obligations_usd']}"
+            )
+            print(f"Parquet: {report['fact_file']}")
+            return 0
+        except (ApiError, ValueError, OSError, json.JSONDecodeError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
     if args.command == "verify":
         try:
             return verify_job(args.job.resolve())

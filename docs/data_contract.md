@@ -52,3 +52,25 @@ structure (transaction key versus subaward key); only prime transactions
 are reconciled with the `/download/count/` preflight for transaction-level
 spending. Subawards remain separately available for future subcontracting
 analysis and **must not be added** to prime federal obligations.
+
+## v0.2 Silver model (contract transactions only)
+
+`fsi silver --job <verified-job.json>` outputs `fact_contract_transactions.parquet`.
+
+- **Primary key:** `transaction_key` from `contract_transaction_unique_key`.
+- **Award-level foreign key:** `award_key` from `contract_award_unique_key`.
+- **Additive financial measure:** `obligation_change_usd`, signed `DECIMAL(38,10)`.
+- **Dates:** `action_date` (`DATE`), `fiscal_year` computed using Oct 1 FY boundary.
+- **Identifiers:** strings (agency IDs, NAICS, PSC, UEIs), preserving leading zeros.
+- **Flags:** `is_deobligation`, `is_positive_obligation`.
+- **Key dimensions (degenerate attributes for now):** awarding/funding agencies,
+  recipient UEI and parent UEI, NAICS, PSC, performance geography.
+- **Deliberately excluded non-additive snapshot fields:**
+  `total_dollars_obligated`, `total_outlayed_amount_for_overall_award`.
+- **Subawards:** never joined/summed with transaction obligations.
+
+The Bronze file keeps all original columns; Silver keeps a stable, curated
+subset. Enforce the verified Bronze gate before building Silver. Silver checks
+row count, unique key count, date bounds, FY consistency, signed-amount sum,
+negative count and non-null typed amounts. Silver jobs are kept separate until
+cross-partition reconciliation is implemented in v0.3.

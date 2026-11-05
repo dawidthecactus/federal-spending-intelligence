@@ -8,6 +8,7 @@ dist/
 build/
 data/raw/
 data/staging/
+data/silver/
 data/marts/
 *.duckdb
 *.duckdb.wal

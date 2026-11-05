@@ -4,7 +4,7 @@
 
 Reproducible acquisition of **federal contract transactions**, not award totals.
 Source: https://api.usaspending.gov/docs/endpoints (official US Treasury data).
-Current version: **v0.1.1 data acquisition + corrected Quality Gate**. No fabricated data is included.
+Current version: **v0.2 typed Silver + corrected Bronze Quality Gate**. No fabricated data is included.
 
 ## Quick start (Windows PowerShell)
 
@@ -12,10 +12,9 @@ Current version: **v0.1.1 data acquisition + corrected Quality Gate**. No fabric
 cd "$HOME\Desktop\Porfolio\Power BI"
 # Extract the ZIP here; then:
 cd .\federal-spending-intelligence
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-pytest -q
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pytest -q
 
 # Check the 12 date windows in fiscal year 2026:
 fsi plan --fy 2026
@@ -35,6 +34,48 @@ If PowerShell execution policy prevents activation, skip activation:
 .\.venv\Scripts\fsi.exe probe --fy 2026 --limit 300 --agency "Department of Transportation"
 .\.venv\Scripts\fsi.exe bulk --start 2026-09-01 --end 2026-09-30 --agency "Department of Transportation"
 ```
+
+## v0.2: Typed Silver transaction fact
+
+Once a bulk export has `BULK_VERIFIED`, run:
+
+```powershell
+.\.venv\Scripts\fsi.exe silver --job ".\data\raw\bulk\2026-09-01_2026-09-30_20261105T144143Z\job.json"
+```
+
+This **does not** call the USAspending API or download data again. It re-runs
+`verify` (including original ZIP SHA-256), reads ONLY `PrimeTransactions`,
+and writes one typed Parquet file plus a machine-readable audit:
+
+- `data/silver/jobs/<bulk-job-id>/fact_contract_transactions.parquet`
+- `data/silver/jobs/<bulk-job-id>/silver_quality.json`
+
+Silver uses `contract_transaction_unique_key` as grain; `award_id_piid` is
+NOT a transaction key. `obligation_change_usd` is additive with the **signed**
+transaction value; the award-level cumulative `total_dollars_obligated` and
+`total_outlayed_amount_for_overall_award` are intentionally **excluded** from
+this fact to prevent double counting. Financial amounts are stored in a high
+precision DuckDB DECIMAL type, not binary float. It also adds fiscal year
+(October-to-September), calendar month and a negative-obligation flag.
+
+Quality gates:
+- no null or duplicate transaction keys;
+- date values inside requested period and source FY agrees with derived FY;
+- non-null typed amounts, no lost rows, same count of negative transactions;
+- **exact** sum of signed obligations matches Bronze;
+- subaward rows are **never** merged into contract transactions.
+
+The audit records the input ZIP hash, output Parquet hash, record counts,
+positive/negative/net totals, agency and recipient counts. It does not
+claim the month or agency is representative of all federal spending.
+
+To intentionally rebuild the same Silver file after modifying transformations,
+add `--overwrite` (the original Bronze ZIP stays unchanged).
+
+**Current limitation:** v0.2 outputs a typed fact for one VERIFIED extraction.
+Across-partition duplicate handling and FY2023–FY2026 all-agency orchestration
+are deferred to v0.3. Re-running the same bulk job does not create a new
+national data point. All raw/staging/silver files remain local and Git-ignored.
 
 ## Fix in v0.1.1: prime transactions vs subawards
 
@@ -91,6 +132,7 @@ Copy the actual printed path. **Do not launch a new bulk job to resume.**
 | `data/raw/bulk/` | Full CSV-in-ZIP download, SHA256, job manifest | No |
 | `data/staging/probe/` | Structural probe Parquet | No |
 | `data/staging/bulk/` | Contract transaction columns from official CSV in Parquet | No |
+| `data/silver/jobs/` | Typed and audited transaction fact, one export at a time | No |
 | `docs/` | Definition of grain, dates and controls | Yes |
 
 ## Important financial semantics
@@ -111,7 +153,7 @@ Copy the actual printed path. **Do not launch a new bulk job to resume.**
 ## Suggested expansion plan
 
 1. **v0.1** Verify a live probe and one monthly bulk export (Department of Transportation).
-2. **v0.2** Build typed Silver transaction fact, stable transaction key and DQ tests.
+2. **v0.2** Build typed Silver transaction fact, stable transaction key and DQ tests (**implemented**).
 3. **v0.3** Collect FY2023–FY2026 by agency × month, reconcile totals.
 4. **v0.4** Build Power BI star schema and DAX.
 5. **v0.5+** Financial diagnostics, contractor concentration, anomalies.
@@ -124,5 +166,6 @@ Copy the actual printed path. **Do not launch a new bulk job to resume.**
 - https://github.com/fedspendingtransparency/usaspending-api/blob/master/usaspending_api/api_contracts/contracts/v2/download/transactions.md
 - https://github.com/fedspendingtransparency/usaspending-api/blob/master/usaspending_api/api_contracts/contracts/v2/download/status.md
 
-**Limitations:** Live API calls were not possible in the artifact creation environment;
-the package is offline-tested and awaits the first execution on a networked workstation.
+**Limitations:** The v0.2 Silver step was tested structurally and with offline unit tests.
+A live integration run against your downloaded 3,629-row local Parquet requires
+your workstation (the raw files are not available in this environment).
